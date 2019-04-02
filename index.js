@@ -31,8 +31,8 @@ server.post('/api/register', (req, res) => {
         .catch( err => res.status(500).json(err));
 });
 
-//get all users
-server.get('/api/users', (req, res) => {
+//get all users- authenticate, must be signed in to view all users
+server.get('/api/users', restricted, (req, res) => {
     db('users')
         .then(user => res.status(200).json(user))
         .catch(err => res.status(500).json(err));
@@ -54,6 +54,29 @@ server.post('/api/login', (req, res) => {
         })
         .catch(err => res.status(500).json(err));
 })
+
+//Middleware___________________________________________________________________
+function restricted(req, res, next) {
+    const { username, password } = req.headers;
+
+    if (username && password) {
+        db('users')
+            .where({ username: username })
+            .first()
+            .then( user => {
+                if (user && bcrypt.compareSync(password, user.password)) {
+                    next();
+                } else {
+                    res.status(401).json({error: 'You shall not pass!'})
+                }
+            })
+            .catch(err => res.status(500).json(err))
+    } else {
+        res.status(401).json({error: 'You shall not pass!'})
+    }
+}
+
+
 
 server.listen(5000, () => {
     console.log(`\n** Running on port 5k **\n`)
