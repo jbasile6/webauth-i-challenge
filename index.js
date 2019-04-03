@@ -3,15 +3,41 @@ const helmet = require('helmet');
 const knex = require('knex');
 const bcrypt = require('bcryptjs');
 
-const server = express();
+
 
 const knexConfig = require('./knexfile');
 
 const db = knex(knexConfig.development);
 
+const session = require('express-session');
+const knexSessionStore = require('connect-session-knex')(session);
+
+const server = express();
+
+
+
+const sessionConfig = {
+    name: 'monster', // defaults to sid
+    secret: 'keep it secret, keep it safe!',
+    cookie: {
+        maxAge: 1000 * 60 * 10, // milliseconds
+        secure: false, // use cookie over https
+        httpOnly: true, // false means JS can access the cookie on the client
+    },
+    resave: false, // avoid recreating unchanged sessions
+    saveUninitialized: false, // GDPR compliance
+    store: new knexSessionStore ({
+        knex: db,
+        tablename: 'sessions',
+        sidfieldname: 'sid',
+        createtable: true,
+        clearInterval: 1000 * 60 * 30, // delete expired sessions
+    }),
+}
+
 server.use(helmet());
 server.use(express.json());
-
+server.use(session(sessionConfig));
 
 
 server.get('/', (req, res) => {
@@ -28,7 +54,7 @@ server.post('/api/register', (req, res) => {
 
     db('users').insert(user)
         .then(newUser => res.status(201).json(newUser))
-        .catch( err => res.status(500).json(err));
+        .catch(err => res.status(500).json(err));
 });
 
 //get all users- authenticate, must be signed in to view all users
@@ -45,10 +71,11 @@ server.post('/api/login', (req, res) => {
         .first()
         .then(user => {
             if (user && bcrypt.compareSync(req.body.password, user.password)) {
-                res.status(200).json({ message: `Welcome ${user.username}`, cookie: user.id })
-                //not sure how to create a new session, based on what i'm seeeing in tomorrow's TK, the cookie isnt correct either
-                //looks like this is for tomorrow's project
-            } else{
+                req.session.user = user;
+
+                res.status(200).json({ message: `Welcome ${user.username}` })
+                
+            } else {
                 res.status(400).json({ error: 'You shall not pass' })
             }
         })
@@ -57,22 +84,19 @@ server.post('/api/login', (req, res) => {
 
 //Middleware___________________________________________________________________
 function restricted(req, res, next) {
-    const { username, password } = req.headers;
 
-    if (username && password) {
+    if (req.session.user) {
         db('users')
-            .where({ username: username })
-            .first()
-            .then( user => {
-                if (user && bcrypt.compareSync(password, user.password)) {
+            .then(users => {
+                if (users) {
                     next();
                 } else {
-                    res.status(401).json({error: 'You shall not pass!'})
+                    res.status(401).json({ error: 'You shall not pass!' })
                 }
             })
             .catch(err => res.status(500).json(err))
     } else {
-        res.status(401).json({error: 'You shall not pass!'})
+        res.status(401).json({ error: 'You shall not pass!' })
     }
 }
 
